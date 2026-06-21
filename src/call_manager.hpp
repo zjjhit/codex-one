@@ -2,6 +2,7 @@
 
 #include "config.hpp"
 #include "log_store.hpp"
+#include "timer_scheduler.hpp"
 
 #include <functional>
 #include <set>
@@ -32,6 +33,7 @@ public:
   using HangupFn = std::function<void(const std::string &)>;
 
   CallManager(ConfigStore &config_store, LogStore &log_store);
+  ~CallManager();
   void set_hangup_fn(HangupFn fn);
   CallDecision on_invite(const IncomingCall &incoming);
   void on_ack(const std::string &local_call_id);
@@ -40,6 +42,8 @@ public:
   void on_local_hangup_sent(const std::string &local_call_id, bool ok, const std::string &error = "");
   MetricsSnapshot metrics() const;
   void reset_daily_counter();
+  void set_draining(bool draining);
+  bool draining() const;
 
 private:
   struct Session {
@@ -51,12 +55,19 @@ private:
   mutable std::mutex mutex_;
   ConfigStore &config_store_;
   LogStore &log_store_;
+  TimerScheduler scheduler_;
   HangupFn hangup_fn_;
   std::unordered_map<std::string, Session> sessions_;
+  bool draining_ = false;
   uint64_t total_calls_ = 0;
   uint64_t answered_ = 0;
   uint64_t rejected_ = 0;
   uint64_t abnormal_ = 0;
+  uint64_t peak_concurrent_ = 0;
+  uint64_t rejected_prefix_mismatch_ = 0;
+  uint64_t rejected_probability_ = 0;
+  uint64_t rejected_daily_limit_ = 0;
+  uint64_t rejected_concurrency_limit_ = 0;
   uint64_t answer_latency_sum_ms_ = 0;
   uint64_t hangup_latency_sum_ms_ = 0;
   uint64_t hangup_latency_count_ = 0;
@@ -66,6 +77,7 @@ private:
   void rollover_day_locked();
   void close_session_locked(const std::string &local_call_id, const std::string &status, const std::string &error);
   void schedule_hangup(const std::string &local_call_id, int seconds);
+  CallDecision reject_locked(const IncomingCall &incoming, const Config &config, const std::string &status, int code, const std::string &reason);
 };
 
 } // namespace sae

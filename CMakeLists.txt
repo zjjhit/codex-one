@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(sip_answer_engine VERSION 0.1.0 LANGUAGES CXX)
+project(sip_answer_engine VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,6 +14,8 @@ add_executable(sip-answer-engine
   src/http_server.cpp
   src/sip_udp_engine.cpp
   src/log_store.cpp
+  src/timer_scheduler.cpp
+  src/rtp_session.cpp
 )
 
 target_include_directories(sip-answer-engine PRIVATE src)

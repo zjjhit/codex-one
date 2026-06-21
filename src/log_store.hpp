@@ -3,7 +3,9 @@
 #include "common.hpp"
 #include "config.hpp"
 
+#include <condition_variable>
 #include <fstream>
+#include <thread>
 
 #if SAE_HAVE_SQLITE
 #include <sqlite3.h>
@@ -38,6 +40,16 @@ struct MetricsSnapshot {
   uint64_t rejected = 0;
   uint64_t abnormal = 0;
   uint64_t current_concurrent = 0;
+  uint64_t peak_concurrent = 0;
+  uint64_t rejected_prefix_mismatch = 0;
+  uint64_t rejected_probability = 0;
+  uint64_t rejected_daily_limit = 0;
+  uint64_t rejected_concurrency_limit = 0;
+  uint64_t log_queue_depth = 0;
+  uint64_t log_dropped = 0;
+  uint64_t timer_pending = 0;
+  uint64_t rtp_ports_in_use = 0;
+  uint64_t rtp_ports_available = 0;
   double avg_answer_ms = 0;
   double avg_hangup_ms = 0;
   int daily_answer_count = 0;
@@ -53,14 +65,25 @@ public:
   void open(const Config &config);
   void append(const CallRecord &record);
   std::string query_json(size_t limit) const;
+  size_t queue_depth() const;
+  uint64_t dropped() const;
+  void stop();
 
 private:
   mutable std::mutex mutex_;
+  std::condition_variable cv_;
   std::string jsonl_path_;
   std::vector<CallRecord> recent_;
+  std::vector<CallRecord> queue_;
+  std::thread worker_;
+  bool running_ = false;
+  uint64_t dropped_ = 0;
 #if SAE_HAVE_SQLITE
   sqlite3 *db_ = nullptr;
 #endif
+
+  void write_record(const CallRecord &record);
+  void worker_loop();
 };
 
 } // namespace sae

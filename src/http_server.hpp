@@ -5,6 +5,7 @@
 #include "log_store.hpp"
 #include "sip_udp_engine.hpp"
 
+#include <condition_variable>
 #include <thread>
 
 namespace sae {
@@ -24,8 +25,13 @@ private:
   std::atomic<bool> running_{false};
   int fd_ = -1;
   std::thread thread_;
+  std::vector<std::thread> workers_;
+  std::mutex queue_mutex_;
+  std::condition_variable queue_cv_;
+  std::vector<int> client_queue_;
 
   void loop();
+  void worker_loop();
   void handle_client(int client);
   static std::string response(int code, const std::string &body, const std::string &content_type = "application/json");
   static std::map<std::string, std::string> query_params(const std::string &target);

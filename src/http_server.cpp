@@ -44,6 +44,7 @@ bool HttpServer::start(std::string &error) {
     return false;
   }
   running_ = true;
+  for (int i = 0; i < 4; ++i) workers_.emplace_back([this] { worker_loop(); });
   thread_ = std::thread([this] { loop(); });
   return true;
 }
@@ -56,13 +57,45 @@ void HttpServer::stop() {
     fd_ = -1;
   }
   if (thread_.joinable()) thread_.join();
+  queue_cv_.notify_all();
+  for (auto &worker : workers_) {
+    if (worker.joinable()) worker.join();
+  }
+  workers_.clear();
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    for (int client : client_queue_) ::close(client);
+    client_queue_.clear();
+  }
 }
 
 void HttpServer::loop() {
   while (running_) {
     int client = accept(fd_, nullptr, nullptr);
     if (client < 0) continue;
-    std::thread([this, client] { handle_client(client); }).detach();
+    {
+      std::lock_guard<std::mutex> lock(queue_mutex_);
+      if (client_queue_.size() >= 1024) {
+        ::close(client);
+      } else {
+        client_queue_.push_back(client);
+      }
+    }
+    queue_cv_.notify_one();
+  }
+}
+
+void HttpServer::worker_loop() {
+  while (true) {
+    int client = -1;
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex_);
+      queue_cv_.wait(lock, [this] { return !running_ || !client_queue_.empty(); });
+      if (!running_ && client_queue_.empty()) break;
+      client = client_queue_.front();
+      client_queue_.erase(client_queue_.begin());
+    }
+    if (client >= 0) handle_client(client);
   }
 }
 
@@ -99,7 +132,12 @@ void HttpServer::handle_client(int client) {
       << ",\"registration_status\":\"" << (c.enable_registration ? "not_implemented_in_udp_engine" : "disabled") << "\"}";
     out = response(200, b.str());
   } else if (method == "GET" && path == "/metrics") {
-    out = response(200, call_manager_.metrics().to_json());
+    auto metrics = call_manager_.metrics();
+    metrics.rtp_ports_in_use = sip_engine_.rtp_ports_in_use();
+    metrics.rtp_ports_available = sip_engine_.rtp_ports_available();
+    out = response(200, metrics.to_json());
+  } else if (method == "GET" && path == "/runtime") {
+    out = response(200, sip_engine_.runtime_json());
   } else if (method == "GET" && path == "/config") {
     out = response(200, config_store_.current().to_json());
   } else if (method == "PUT" && path == "/config") {
@@ -121,6 +159,12 @@ void HttpServer::handle_client(int client) {
   } else if (method == "POST" && path == "/admin/reset-daily-counter") {
     call_manager_.reset_daily_counter();
     out = response(200, "{\"ok\":true}");
+  } else if (method == "POST" && path == "/admin/drain") {
+    call_manager_.set_draining(true);
+    out = response(200, "{\"ok\":true,\"draining\":true}");
+  } else if (method == "POST" && path == "/admin/resume") {
+    call_manager_.set_draining(false);
+    out = response(200, "{\"ok\":true,\"draining\":false}");
   } else {
     out = response(404, "{\"error\":\"not found\"}");
   }

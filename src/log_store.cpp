@@ -41,6 +41,16 @@ std::string MetricsSnapshot::to_json() const {
       << "\"rejected\":" << rejected << ","
       << "\"abnormal\":" << abnormal << ","
       << "\"current_concurrent\":" << current_concurrent << ","
+      << "\"peak_concurrent\":" << peak_concurrent << ","
+      << "\"rejected_prefix_mismatch\":" << rejected_prefix_mismatch << ","
+      << "\"rejected_probability\":" << rejected_probability << ","
+      << "\"rejected_daily_limit\":" << rejected_daily_limit << ","
+      << "\"rejected_concurrency_limit\":" << rejected_concurrency_limit << ","
+      << "\"log_queue_depth\":" << log_queue_depth << ","
+      << "\"log_dropped\":" << log_dropped << ","
+      << "\"timer_pending\":" << timer_pending << ","
+      << "\"rtp_ports_in_use\":" << rtp_ports_in_use << ","
+      << "\"rtp_ports_available\":" << rtp_ports_available << ","
       << "\"avg_answer_ms\":" << avg_answer_ms << ","
       << "\"avg_hangup_ms\":" << avg_hangup_ms << ","
       << "\"daily_answer_count\":" << daily_answer_count << ","
@@ -52,6 +62,7 @@ std::string MetricsSnapshot::to_json() const {
 LogStore::LogStore() = default;
 
 LogStore::~LogStore() {
+  stop();
 #if SAE_HAVE_SQLITE
   if (db_) sqlite3_close(db_);
 #endif
@@ -60,7 +71,11 @@ LogStore::~LogStore() {
 void LogStore::open(const Config &config) {
   std::lock_guard<std::mutex> lock(mutex_);
   std::filesystem::create_directories(config.log_dir);
-  jsonl_path_ = config.log_dir + "/calls.jsonl";
+  jsonl_path_ = config.log_dir + "/calls-" + today_utc() + ".jsonl";
+  if (!running_) {
+    running_ = true;
+    worker_ = std::thread([this] { worker_loop(); });
+  }
 #if SAE_HAVE_SQLITE
   if (db_) sqlite3_close(db_);
   db_ = nullptr;
@@ -80,11 +95,22 @@ void LogStore::open(const Config &config) {
 }
 
 void LogStore::append(const CallRecord &record) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    recent_.push_back(record);
+    if (recent_.size() > 1000) recent_.erase(recent_.begin(), recent_.begin() + 100);
+    if (queue_.size() >= 10000) {
+      dropped_++;
+      return;
+    }
+    queue_.push_back(record);
+  }
+  cv_.notify_one();
+}
+
+void LogStore::write_record(const CallRecord &record) {
   std::ofstream out(jsonl_path_, std::ios::app);
   out << record.to_json() << "\n";
-  recent_.push_back(record);
-  if (recent_.size() > 1000) recent_.erase(recent_.begin(), recent_.begin() + 100);
 #if SAE_HAVE_SQLITE
   if (db_) {
     const char *sql = "INSERT OR REPLACE INTO calls VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
@@ -114,6 +140,18 @@ void LogStore::append(const CallRecord &record) {
 #endif
 }
 
+void LogStore::worker_loop() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  while (running_ || !queue_.empty()) {
+    cv_.wait(lock, [this] { return !running_ || !queue_.empty(); });
+    std::vector<CallRecord> batch;
+    batch.swap(queue_);
+    lock.unlock();
+    for (const auto &record : batch) write_record(record);
+    lock.lock();
+  }
+}
+
 std::string LogStore::query_json(size_t limit) const {
   std::lock_guard<std::mutex> lock(mutex_);
   std::ostringstream out;
@@ -125,6 +163,26 @@ std::string LogStore::query_json(size_t limit) const {
   }
   out << "]}";
   return out.str();
+}
+
+size_t LogStore::queue_depth() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return queue_.size();
+}
+
+uint64_t LogStore::dropped() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return dropped_;
+}
+
+void LogStore::stop() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!running_) return;
+    running_ = false;
+  }
+  cv_.notify_all();
+  if (worker_.joinable()) worker_.join();
 }
 
 } // namespace sae

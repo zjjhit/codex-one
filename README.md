@@ -54,3 +54,45 @@ sipp 127.0.0.1:5060 -sf tests/sipp/uac_invite.xml -s 8881000 -m 1000 -r 100
 ## 生产化接入建议
 
 当前最小 SIP UDP 引擎用于快速闭环和压测验证。正式接入运营级线路时，建议在不改变 `CallManager`、配置、日志和 HTTP 控制面的前提下，将 `SipUdpEngine` 替换为 PJSIP/PJMEDIA 适配器，以获得完整注册、鉴权、NAT、SDP/RTP 兼容性和更强的协议容错能力。
+
+## v0.2 Stress Enhancement Checks
+
+The v0.2 branch adds a shared timer scheduler, async call logging, RTP port allocation, silent RTP keepalive, runtime metrics, and drain/resume controls.
+
+Recommended validation on Linux:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+./build/sip-answer-engine --config config.yaml
+```
+
+Smoke test:
+
+```bash
+sipp 127.0.0.1:5060 -sf tests/sipp/uac_invite.xml -s 8881000 -m 1 -r 1
+curl http://127.0.0.1:8080/metrics
+curl http://127.0.0.1:8080/runtime
+curl 'http://127.0.0.1:8080/calls?limit=10'
+```
+
+Concurrency checks:
+
+```bash
+sipp 127.0.0.1:5060 -sf tests/sipp/uac_invite.xml -s 8881000 -m 100 -r 20
+sipp 127.0.0.1:5060 -sf tests/sipp/uac_invite.xml -s 8881000 -m 1000 -r 100
+```
+
+Operational controls:
+
+```bash
+curl -X POST http://127.0.0.1:8080/admin/drain
+curl -X POST http://127.0.0.1:8080/admin/resume
+```
+
+Acceptance indicators:
+
+- `current_concurrent` returns to `0` after SIPp completes.
+- `rtp_ports_in_use` returns to `0` and `rtp_ports_available` returns to the configured pool size.
+- `log_dropped` stays `0` during normal 1000-call tests.
+- The daily JSONL log file is created as `logs/calls-YYYY-MM-DD.jsonl`.
