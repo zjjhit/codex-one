@@ -10,18 +10,56 @@
 - 日志存储：结构化 JSON Lines；如果编译环境存在 SQLite3，自动额外写入 `logs/calls.db`。
 - 目标运行环境：Linux。PJSIP/PJMEDIA 的生产级媒体栈可在 `SipEngine` 边界替换接入。
 
-## 构建
+## 构建与打包
+
+可以使用根目录下的 `build.sh` 脚本一键完成编译和部署目录打包：
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
+./build.sh
 ```
+
+脚本执行成功后会在项目根目录下生成部署目录 `dist/`。
+
+## 部署说明
+
+您可以将打包生成的 `dist/` 目录中的内容复制到目标服务器进行部署。部署目录的结构如下：
+
+```text
+dist/
+├── bin/
+│   └── sip-answer-engine     # 编译后的引擎二进制程序
+├── config.yaml               # 配置文件
+├── start.sh                  # 服务启动脚本
+├── stop.sh                   # 服务停止脚本
+├── test.sh                   # SIPp 压测测试脚本
+└── tests/                    # 测试资源文件
+    └── sipp/
+        └── uac_invite.xml
+```
+
+### 服务管理
+
+在部署目录下，您可以通过以下命令来管理服务的启动、停止和测试：
+
+- **启动服务**：
+  ```bash
+  ./start.sh
+  ```
+  服务将在后台运行，PID 将写入 `logs/sip-answer-engine.pid`，标准输出与错误日志将输出至 `logs/stdout.log`。
+
+- **停止服务**：
+  ```bash
+  ./stop.sh
+  ```
+  停止脚本将优雅地终止服务（最多等待 5 秒），如果超时仍未退出，则会强制结束进程。
+
+- **运行压测**：
+  ```bash
+  ./test.sh [目标IP] [总呼叫数] [呼叫速率]
+  ```
+  例如：`./test.sh 127.0.0.1 100 10`。如果部署环境中没有安装 `docker`，脚本会自动提示本地压测所使用的 `sipp` 对应指令。
 
 ## 运行
-
-```bash
-./build/sip-answer-engine --config config.yaml
-```
 
 默认监听：
 
