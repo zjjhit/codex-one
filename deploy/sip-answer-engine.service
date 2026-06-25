@@ -1,0 +1,17 @@
+[Unit]
+Description=SIP Answer Engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/sip-answer-engine
+ExecStart=/opt/sip-answer-engine/build/sip-answer-engine --config /etc/sip-answer-engine/config.yaml
+Restart=always
+RestartSec=3
+User=sipanswer
+Group=sipanswer
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

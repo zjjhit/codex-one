@@ -55,9 +55,17 @@ sipp 127.0.0.1:5060 -sf tests/sipp/uac_invite.xml -s 8881000 -m 1000 -r 100
 
 当前最小 SIP UDP 引擎用于快速闭环和压测验证。正式接入运营级线路时，建议在不改变 `CallManager`、配置、日志和 HTTP 控制面的前提下，将 `SipUdpEngine` 替换为 PJSIP/PJMEDIA 适配器，以获得完整注册、鉴权、NAT、SDP/RTP 兼容性和更强的协议容错能力。
 
-## v0.2 Stress Enhancement Checks
+## v0.3 Deployment and Stress Checks
 
-The v0.2 branch adds a shared timer scheduler, async call logging, RTP port allocation, silent RTP keepalive, runtime metrics, and drain/resume controls.
+The v0.3 branch keeps the v0.2 stress enhancements and adds Kylin/Linux deployment packaging scripts.
+
+Cloud deployment and peer interconnect documents:
+
+- `docs/cloud-deployment-and-interconnect.md`
+- `docs/peer-interconnect-checklist.md`
+- `deploy/cloud-config.example.yaml`
+- `deploy/sip-answer-engine.service`
+
 
 Recommended validation on Linux:
 
